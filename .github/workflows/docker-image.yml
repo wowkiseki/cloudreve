@@ -1,0 +1,74 @@
+name: Docker Publish
+
+# 仅在推送 tag 时触发，例如：v3.8.3, 3.8.3
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'latest'
+
+env:
+  # 镜像名称，这里假设你要推送到 cloudreve/cloudreve 仓库
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/cloudreve
+
+jobs:
+  # 构建和推送镜像任务
+  build_and_push:
+    # 使用最新的 Ubuntu 运行环境
+    runs-on: ubuntu-latest
+    
+    # 定义环境条件：确保 Docker Hub 凭证已设置
+    environment:
+      name: docker-hub
+      
+    steps:
+      - name: ⬇️ Checkout code
+        # 获取仓库代码
+        uses: actions/checkout@v4
+        
+      - name: 🛠️ Set up QEMU
+        # 设置 QEMU 以支持多平台镜像构建
+        uses: docker/setup-qemu-action@v3
+        
+      - name: ⚙️ Set up Docker Buildx
+        # 设置 Docker Buildx，用于更高级的构建特性，如多平台
+        uses: docker/setup-buildx-action@v3
+        
+      - name: 🔑 Login to Docker Hub
+        # 登录 Docker Hub，需要用到 GitHub Secrets 中的 DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          
+      - name: 🏷️ Extract Docker metadata
+        # 提取 Git tag 作为 Docker 镜像的 tag
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          # 自动为 tags (如 v3.8.3) 生成相应的 Docker 标签
+          tags: |
+            type=ref,event=tag
+            # 此外，如果推送的 tag 是 'latest'，则保留 'latest' 标签
+            type=raw,value=latest,enable=${{ github.ref == 'refs/tags/latest' }}
+            
+      - name: 🏗️ Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          # 推送构建好的镜像
+          push: true
+          # 构建上下文路径，使用当前目录
+          context: .
+          # Dockerfile 路径，默认为 ./Dockerfile
+          file: ./Dockerfile 
+          # 目标平台，这里构建 amd64 和 arm64 两个主流架构
+          platforms: |
+            linux/amd64
+            linux/arm64
+          # 使用元数据步骤生成的标签和镜像名
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 缓存设置，加速后续构建
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
